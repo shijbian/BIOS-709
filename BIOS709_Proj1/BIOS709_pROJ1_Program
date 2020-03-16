@@ -1,0 +1,1692 @@
+# - Install packages
+library(sas7bdat)
+library(tidyverse)
+
+# - Read file
+fpath <- file.path("~",
+          "Dropbox",
+          "Emory Courses",
+          "Spring 2020",
+          "BIOS 709",
+          "Project1")
+
+source(paste(fpath, "/Program", "/helper.R", sep = ""))
+
+PCV7_IPD <-read.sas7bdat(
+    paste(fpath, "/Materials", "/PCV7_IPD.sas7bdat", sep = "")
+  )
+
+PCV7_IPD$YEAR <- factor(PCV7_IPD$YEAR)
+PCV7_IPD$State <- factor(PCV7_IPD$State)
+PCV7_IPD$Age_Group <- factor(PCV7_IPD$Age_Group)
+
+################################################################################
+############################ Part 0: Missing Data ##############################
+################################################################################
+# Make sure finalfit is up-to-date 
+#install.packages("finalfit")
+library(finalfit)
+PCV7_IPD %>%
+  missing_plot()
+ggsave(paste(fpath, "/Output", "/missing_data_map.png", sep = ""),
+       width = 30, 
+       height = 18, 
+       units = "cm")
+
+PCV7_IPD$rate <- PCV7_IPD$IPD/PCV7_IPD$Population
+explanatory = c("YEAR", "State", 
+                "Age_Group", "Population",  
+                "PCV_Coverage", "Influenza","logInflenza", "IPD")
+dependent = "rate"
+PCV7_IPD %>% 
+  missing_pairs(dependent, explanatory)
+ggsave(paste(fpath, "/Output", "/missing_matrix.png", sep = ""),
+       width = 30, 
+       height = 35, 
+       units = "cm")
+
+
+PCV7_IPD %>%
+  group_by(is.na(logInflenza)) %>%
+  summarise(mean = mean(rate),
+            sd = sd(rate))
+t.test(PCV7_IPD$rate[is.na(PCV7_IPD$logInflenza)],
+       PCV7_IPD$rate[!is.na(PCV7_IPD$logInflenza)], 
+       var.equal = FALSE)
+
+
+#### ------- Log Flu---------- ####
+
+pcv_cov <- ggplot(data = PCV7_IPD2, mapping = aes(x = `Calendar Year`,
+                                                  y = State,
+                                                  fill = logFlu)) +
+  geom_tile() +
+  xlab(label = "Year of the program and age group") +
+  facet_grid(~ Age_Group2, switch = "x", scales = "free_x", space = "free_x") +
+  scale_fill_gradient(name = "Log Influenza",
+                      low = "#FFFFFF",
+                      high = "#012345")+
+  theme(strip.placement = "outside")+
+  ggtitle(label = "Log transformed rate of influenza conditioned on year of the program, state and age group")
+pcv_cov
+ggsave(paste(fpath, "/Output", "/LogInfluenza.png", sep = ""),
+       width = 30, 
+       height = 18, 
+       units = "cm")
+
+
+################################################################################
+######################### Part I: Univariate Analysis ##########################
+################################################################################
+
+############## ---------- Table A
+dim(PCV7_IPD)
+
+# - year
+PCV7_IPD %>%
+  group_by(YEAR) %>%
+  summarise(n = n()) %>%
+  mutate(perc = round(n/480*100, 2))
+table(is.na(PCV7_IPD$YEAR))
+lm_year <- glm(IPD~YEAR, 
+           offset = log(Population), 
+           data = PCV7_IPD, family = poisson())
+summary(lm_year)
+getCI(lm_year)
+
+PCV7_IPD_NB <- glm.nb(IPD~YEAR + 
+                       offset(log(Population)),
+                     data = PCV7_IPD)
+summary(PCV7_IPD_NB)
+getCI(PCV7_IPD_NB)
+
+
+chitest <- -2*logLik( lm_year ) -  (-2*logLik( PCV7_IPD_NB ))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+par(mfrow=c(1,2))
+df <- data.frame(
+  Fitted_values = lm_year$fitted.values,
+  Pearson_Residuals = residuals(lm_year, type="pearson")^2
+)
+with(df, scatter.smooth(Fitted_values, Pearson_Residuals))
+abline(h=1, col="red")
+title(main = "Poisson: Regress on Year")
+
+df <- data.frame(
+  Fitted_values = PCV7_IPD_NB$fitted.values,
+  Pearson_Residuals = residuals(PCV7_IPD_NB, type="pearson")^2
+)
+with(df, scatter.smooth(Fitted_values, Pearson_Residuals))
+abline(h=1, col="red")
+title(main = "NB: Regress on Year")
+
+
+# - age
+PCV7_IPD %>%
+  group_by(Age_Group) %>%
+  summarise(n = n()) %>%
+  mutate(perc = round(n/480*100, 2))
+table(is.na(PCV7_IPD$YEAR))
+lm_age <- glm(IPD~Age_Group, 
+               offset = log(Population), 
+               data = PCV7_IPD, family = poisson())
+summary(lm_age)
+getCI(lm_age)
+
+lm_age_nb <- glm.nb(IPD~Age_Group + 
+                        offset(log(Population)),
+                      data = PCV7_IPD)
+summary(lm_age_nb)
+getCI(lm_age_nb)
+
+chitest <- -2*logLik( lm_age ) -  (-2*logLik( lm_age_nb ))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+
+par(mfrow=c(1,2))
+df <- data.frame(
+  Fitted_values = lm_age$fitted.values,
+  Pearson_Residuals = residuals(lm_age, type="pearson")^2
+)
+with(df, scatter.smooth(Fitted_values, Pearson_Residuals))
+abline(h=1, col="red")
+title(main = "Poisson: Regress on Age")
+
+df <- data.frame(
+  Fitted_values = lm_age_nb$fitted.values,
+  Pearson_Residuals = residuals(lm_age_nb, type="pearson")^2
+)
+with(df, scatter.smooth(Fitted_values, Pearson_Residuals))
+abline(h=1, col="red")
+title(main = "NB: Regress on Age")
+
+
+# - PCV coverage
+table(is.na(PCV7_IPD$PCV_Coverage))
+mean(PCV7_IPD$PCV_Coverage)
+sd(PCV7_IPD$PCV_Coverage)
+lm_PCV <- glm(IPD~PCV_Coverage, 
+              offset = log(Population), 
+              data = PCV7_IPD, family = poisson())
+summary(lm_PCV)
+getCI(lm_PCV)
+
+
+lm_PCV_nb <- glm.nb(IPD~PCV_Coverage + 
+                      offset(log(Population)),
+                    data = PCV7_IPD)
+summary(lm_PCV_nb)
+getCI(lm_PCV_nb)
+
+chitest <- -2*logLik( lm_PCV ) -  (-2*logLik( lm_PCV_nb ))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+
+par(mfrow=c(1,2))
+df <- data.frame(
+  Fitted_values = lm_PCV$fitted.values,
+  Pearson_Residuals = residuals(lm_PCV, type="pearson")^2
+)
+with(df, scatter.smooth(Fitted_values, Pearson_Residuals))
+abline(h=1, col="red")
+title(main = "Poisson: Regress on PCV coverage")
+
+df <- data.frame(
+  Fitted_values = lm_PCV_nb$fitted.values,
+  Pearson_Residuals = residuals(lm_PCV_nb, type="pearson")^2
+)
+with(df, scatter.smooth(Fitted_values, Pearson_Residuals))
+abline(h=1, col="red")
+title(main = "NB: Regress on PCV coverage")
+
+# - Rate of Influenza
+table(is.na(PCV7_IPD$Influenza))
+mean(PCV7_IPD$Influenza, na.rm = T)
+sd(PCV7_IPD$Influenza, na.rm = T)
+lm_flu <- glm(IPD~Influenza, 
+              offset = log(Population), 
+              data = PCV7_IPD, family = poisson())
+summary(lm_flu)
+getCI(lm_flu)
+
+
+lm_flu_nb <- glm.nb(IPD~Influenza + 
+                      offset(log(Population)),
+                    data = PCV7_IPD)
+summary(lm_flu_nb)
+getCI(lm_flu_nb)
+
+chitest <- -2*logLik( lm_flu ) -  (-2*logLik( lm_flu_nb ))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+
+
+par(mfrow=c(1,2))
+df <- data.frame(
+  Fitted_values = lm_flu$fitted.values,
+  Pearson_Residuals = residuals(lm_flu, type="pearson")^2
+)
+with(df, scatter.smooth(Fitted_values, Pearson_Residuals))
+abline(h=1, col="red")
+title(main = "Poisson: Regress on Rate of Influenza")
+
+df <- data.frame(
+  Fitted_values = lm_flu_nb$fitted.values,
+  Pearson_Residuals = residuals(lm_flu_nb, type="pearson")^2
+)
+with(df, scatter.smooth(Fitted_values, Pearson_Residuals))
+abline(h=1, col="red")
+title(main = "NB: Regress on Rate of Influenza")
+
+
+# - Rate of LOG Influenza
+PCV7_IPD4 <- PCV7_IPD
+PCV7_IPD4$logInflenza <- log(PCV7_IPD4$Influenza)
+PCV7_IPD4$logInflenza[!is.finite(PCV7_IPD4$logInflenza)] = NA
+PCV7_IPD4 <- PCV7_IPD4[complete.cases(PCV7_IPD4$logInflenza),]
+mean(PCV7_IPD4$logInflenza)
+sd(PCV7_IPD4$logInflenza)
+lm_flu <- glm(IPD~logInflenza, 
+              offset = log(Population), 
+              data = PCV7_IPD4, family = poisson())
+summary(lm_flu)
+getCI(lm_flu)
+
+lm_logflu_nb <- glm.nb(IPD~logInflenza + 
+                      offset(log(Population)),
+                    data = PCV7_IPD)
+summary(lm_logflu_nb)
+getCI(lm_logflu_nb)
+
+chitest <- -2*logLik( lm_flu ) -  (-2*logLik( lm_logflu_nb ))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+
+
+par(mfrow=c(1,2))
+df <- data.frame(
+  Fitted_values = lm_flu$fitted.values,
+  Pearson_Residuals = residuals(lm_flu, type="pearson")^2
+)
+with(df, scatter.smooth(Fitted_values, Pearson_Residuals))
+abline(h=1, col="red")
+title(main = "Poisson: Regress on log (Rate of Influenza)")
+
+df <- data.frame(
+  Fitted_values = lm_logflu_nb$fitted.values,
+  Pearson_Residuals = residuals(lm_logflu_nb, type="pearson")^2
+)
+with(df, scatter.smooth(Fitted_values, Pearson_Residuals))
+abline(h=1, col="red")
+title(main = "NB: Regress on log(Rate of Influenza)")
+
+
+############## ---------- Interaction effects
+# install.packages("ggExtra")
+library(ggExtra)     # extends ggplot2 
+
+# Age and PCV coverage 
+PCV7_IPD3 <- PCV7_IPD
+PCV7_IPD3$host_perc <- PCV7_IPD3$IPD/PCV7_IPD3$Population
+PCV7_IPD3$Age_Group2 <- ""
+PCV7_IPD3$Age_Group2[PCV7_IPD3$Age_Group == 1] <- "5-17 yr" 
+PCV7_IPD3$Age_Group2[PCV7_IPD3$Age_Group == 2] <- "18-39 yr" 
+PCV7_IPD3$Age_Group2[PCV7_IPD3$Age_Group == 3] <- "40-64 yr" 
+PCV7_IPD3$Age_Group2[PCV7_IPD3$Age_Group == 4] <- "65 and over" 
+PCV7_IPD3$Age_Group2 <- factor(PCV7_IPD3$Age_Group2)
+PCV7_IPD3$Age_Group2 = factor(PCV7_IPD3$Age_Group2,levels=levels(PCV7_IPD3$Age_Group2)[c(3, 1, 2,4)])
+
+ggplot(PCV7_IPD3,
+       aes(x = PCV_Coverage,
+           y = host_perc,
+           color = Age_Group2)) +
+  geom_point(size = .9,
+             alpha = .3) +
+  geom_smooth(method = "lm") +
+  theme_bw() +
+  scale_color_brewer(type = "qual", 
+                     palette = 3) +
+  labs(x = "PCV7 Coverage, %",
+       y = "Rate of IPD-related hospitalization",
+       title = "Conditional effect plot of age group and PCV7 coverage",
+       color = "Age Groups")
+ggsave(paste(fpath, "/Output", "/Conditional_effect_plot_age_pcv.png", sep = ""),
+       width = 30, 
+       height = 18, 
+       units = "cm")
+
+PCV7_IPD3$PCV_Coverage_Cut <-
+  cut(PCV7_IPD3$PCV_Coverage,breaks=c(min(PCV7_IPD3$PCV_Coverage)-0.01,
+                                    quantile(PCV7_IPD3$PCV_Coverage, 0.25),
+                                    quantile(PCV7_IPD3$PCV_Coverage, 0.5),
+                                    quantile(PCV7_IPD3$PCV_Coverage, 0.75),
+                                    max(PCV7_IPD3$PCV_Coverage)+0.01))
+PCV7_IPD3 %>%
+  group_by(Age_Group2, PCV_Coverage_Cut) %>%
+  summarise(mean = mean(host_perc),
+            sd = sd(host_perc)
+  )
+
+ggplot(PCV7_IPD3,
+       aes(x = Influenza,
+           y = host_perc,
+           color = Age_Group2)) +
+  geom_point(size = .9,
+             alpha = .3) +
+  geom_smooth(method = "lm") +
+  theme_bw() +
+  scale_color_brewer(type = "qual", 
+                     palette = 3) +
+  labs(x = "Rate of influenza",
+       y = "Rate of IPD-related hospitalization",
+       title = "Conditional effect plot of age group and rate of influenza",
+       color = "Age Groups")
+ggsave(paste(fpath, "/Output", "/Conditional_effect_plot_age_flu.png", sep = ""),
+       width = 30, 
+       height = 18, 
+       units = "cm")
+
+PCV7_IPD4$Age_Group2 <- ""
+PCV7_IPD4$Age_Group2[PCV7_IPD4$Age_Group == 1] <- "5-17 yr" 
+PCV7_IPD4$Age_Group2[PCV7_IPD4$Age_Group == 2] <- "18-39 yr" 
+PCV7_IPD4$Age_Group2[PCV7_IPD4$Age_Group == 3] <- "40-64 yr" 
+PCV7_IPD4$Age_Group2[PCV7_IPD4$Age_Group == 4] <- "65 and over" 
+PCV7_IPD4$Age_Group2 <- factor(PCV7_IPD4$Age_Group2)
+PCV7_IPD4$Age_Group2 = factor(PCV7_IPD4$Age_Group2,levels=levels(PCV7_IPD4$Age_Group2)[c(3, 1, 2,4)])
+
+PCV7_IPD4$host_perc <- PCV7_IPD4$IPD/PCV7_IPD4$Population
+ggplot(PCV7_IPD4,
+       aes(x = logInflenza,
+           y = host_perc,
+           color = Age_Group2)) +
+  geom_point(size = .9,
+             alpha = .3) +
+  geom_smooth(method = "lm") +
+  theme_bw() +
+  scale_color_brewer(type = "qual", 
+                     palette = 3) +
+  labs(x = "Log(rate of influenza)",
+       y = "Rate of IPD-related hospitalization",
+       title = "Conditional effect plot of age group and log(rate of influenza)",
+       color = "Age Groups")
+ggsave(paste(fpath, "/Output", "/Conditional_effect_plot_age_log_flu.png", sep = ""),
+       width = 30, 
+       height = 18, 
+       units = "cm")
+
+PCV7_IPD3$Influenza_Cut <-
+  cut(PCV7_IPD3$Influenza,breaks=c(min(PCV7_IPD3$Influenza, na.rm = TRUE)-0.01,
+                                      quantile(PCV7_IPD3$Influenza, 0.25, na.rm = TRUE),
+                                      quantile(PCV7_IPD3$Influenza, 0.5, na.rm = TRUE),
+                                      quantile(PCV7_IPD3$Influenza, 0.75, na.rm = TRUE),
+                                      max(PCV7_IPD3$Influenza, na.rm = TRUE)+0.01))
+PCV7_IPD3 %>%
+  filter(!is.na(Influenza_Cut)) %>%
+  group_by(Age_Group2, Influenza_Cut) %>%
+  summarise(mean = mean(host_perc, na.rm = TRUE),
+            sd = sd(host_perc, na.rm = TRUE)
+  )
+
+
+p<-ggplot(PCV7_IPD4, aes(x=Age_Group2, y=logInflenza, fill=Age_Group2)) +
+  geom_boxplot(position=position_dodge(1))
+p
+
+p+scale_fill_manual(values=c('#A6CEE3','#1F78B4', '#B2DF89', '#4DA547'))
+ggsave(paste(fpath, "/Output", "/plot_age_log_flu.png", sep = ""),
+       width = 30, 
+       height = 18, 
+       units = "cm")            
+
+################################################################################
+############################## Part II:  Heatmap  ##############################
+################################################################################
+
+#### ------- IBD ---------- ####
+PCV7_IPD2 <- PCV7_IPD
+PCV7_IPD2$Age_Group2 <- ""
+PCV7_IPD2$Age_Group2[PCV7_IPD2$Age_Group == 1] <- "5-17 yr" 
+PCV7_IPD2$Age_Group2[PCV7_IPD2$Age_Group == 2] <- "18-39 yr" 
+PCV7_IPD2$Age_Group2[PCV7_IPD2$Age_Group == 3] <- "40-64 yr" 
+PCV7_IPD2$Age_Group2[PCV7_IPD2$Age_Group == 4] <- "65 and over" 
+PCV7_IPD2$Age_Group2 <- factor(PCV7_IPD2$Age_Group2)
+PCV7_IPD2$Age_Group2 = factor(PCV7_IPD2$Age_Group2,levels=levels(PCV7_IPD2$Age_Group2)[c(3, 1, 2,4)])
+
+PCV7_IPD2$`Calendar Year` <- ""
+PCV7_IPD2$`Calendar Year`[PCV7_IPD2$YEAR == 1] <- "2000" 
+PCV7_IPD2$`Calendar Year`[PCV7_IPD2$YEAR == 2] <- "2001" 
+PCV7_IPD2$`Calendar Year`[PCV7_IPD2$YEAR == 3] <- "2002" 
+PCV7_IPD2$`Calendar Year`[PCV7_IPD2$YEAR == 4] <- "2003"
+PCV7_IPD2$`Calendar Year`[PCV7_IPD2$YEAR == 5] <- "2004"
+PCV7_IPD2$`Calendar Year`[PCV7_IPD2$YEAR == 6] <- "2005"
+PCV7_IPD2$`Calendar Year`[PCV7_IPD2$YEAR == 7] <- "2006"
+PCV7_IPD2$`Calendar Year` <- factor(PCV7_IPD2$`Calendar Year`)
+
+
+PCV7_IPD2$logFlu <- log(PCV7_IPD2$Influenza)
+PCV7_IPD2$logFlu[is.infinite( PCV7_IPD2$logFlu)] = NA
+
+IBD_heatmap <- ggplot(data = PCV7_IPD2, mapping = aes(x = `Calendar Year`,
+                                                     y = State,
+                                                     fill = IPD/Population)) +
+  geom_tile() +
+  xlab(label = "Year of the program and age group") +
+  facet_grid(~ Age_Group2, switch = "x", scales = "free_x", space = "free_x") +
+  scale_fill_gradient(name = "Rate of IPD-related \nhospitalizations",
+                      low = "#FFFFFF",
+                      high = "#012345")+
+  theme_bw() +
+  theme(strip.placement = "outside", # Move depth boxes to bottom of plot
+        plot.title = element_text(hjust = 0.5), # Center-justify plot title
+        strip.background = element_rect(fill = "#EEEEEE", color = "#FFFFFF")) + # Faint "Depth" boxes
+  ggtitle(label = "Invasive pneumococcal disease (IPD) related hospitalizations rate conditioned on year, state and age group") 
+IBD_heatmap
+ggsave(paste(fpath, "/Output", "/IBD_heatmap.png", sep = ""),
+       width = 30, 
+       height = 18, 
+       units = "cm")
+
+#### ------- IBD Count---------- ####
+
+IBD_count_heatmap <- ggplot(data = PCV7_IPD2, mapping = aes(x = `Calendar Year`,
+                                                      y = State,
+                                                      fill = IPD)) +
+  geom_tile() +
+  xlab(label = "Year of the program and age group") +
+  facet_grid(~ Age_Group2, switch = "x", scales = "free_x", space = "free_x") +
+  scale_fill_gradient(name = "IPD Count",
+                      low = "#FFFFFF",
+                      high = "#012345")+
+  theme_bw() +
+  theme(strip.placement = "outside", # Move depth boxes to bottom of plot
+        plot.title = element_text(hjust = 0.5), # Center-justify plot title
+        strip.background = element_rect(fill = "#EEEEEE", color = "#FFFFFF")) + # Faint "Depth" boxes
+  ggtitle(label = "Invasive pneumococcal disease (IPD) count conditioned on year of the program, state and age group") 
+IBD_count_heatmap
+ggsave(paste(fpath, "/Output", "/IBD_count_heatmap.png", sep = ""),
+       width = 30, 
+       height = 18, 
+       units = "cm")
+
+#### ------- Population---------- ####
+
+IBD_population_heatmap <- ggplot(data = PCV7_IPD2, mapping = aes(x = `Calendar Year`,
+                                                            y = State,
+                                                            fill = Population)) +
+  geom_tile() +
+  xlab(label = "Year of the program and age group") +
+  facet_grid(~ Age_Group2, switch = "x", scales = "free_x", space = "free_x") +
+  scale_fill_gradient(name = "Size of population",
+                      low = "#FFFFFF",
+                      high = "#012345")+
+  theme_bw() +
+  theme(strip.placement = "outside", # Move depth boxes to bottom of plot
+        plot.title = element_text(hjust = 0.5), # Center-justify plot title
+        strip.background = element_rect(fill = "#EEEEEE", color = "#FFFFFF")) + # Faint "Depth" boxes
+  ggtitle(label = "Population conditioned on year of the program, state and age group") 
+IBD_population_heatmap
+ggsave(paste(fpath, "/Output", "/IBD_population_heatmap.png", sep = ""),
+       width = 30, 
+       height = 18, 
+       units = "cm")
+
+#### ------- Influenza---------- ####
+
+Influenza <- ggplot(data = PCV7_IPD2, mapping = aes(x = `Calendar Year`,
+                                                      y = State,
+                                                      fill = Influenza)) +
+  geom_tile() +
+  xlab(label = "Year of the program and age group") +
+  facet_grid(~ Age_Group2, switch = "x", scales = "free_x", space = "free_x") +
+  scale_fill_gradient(name = "Rate of influenza",
+                      low = "#FFFFFF",
+                      high = "#012345")+
+  theme(strip.placement = "outside")+
+  ggtitle(label = "Rate of influenza conditioned on year of the program, state and age group")
+Influenza
+ggsave(paste(fpath, "/Output", "/Influenza.png", sep = ""),
+       width = 30, 
+       height = 18, 
+       units = "cm")
+
+#### ------- PCV_Coverage---------- ####
+
+pcv_cov <- ggplot(data = PCV7_IPD2, mapping = aes(x = `Calendar Year`,
+                                                    y = State,
+                                                    fill = PCV_Coverage)) +
+  geom_tile() +
+  xlab(label = "Year of the program and age group") +
+  facet_grid(~ Age_Group2, switch = "x", scales = "free_x", space = "free_x") +
+  scale_fill_gradient(name = "PCV7 coverage \nrate for <5 yr",
+                      low = "#FFFFFF",
+                      high = "#012345")+
+  theme(strip.placement = "outside")+
+  ggtitle(label = "Percent of children < 5 years covered by PCV7 conditioned on year of the program, state and age group")
+pcv_cov
+ggsave(paste(fpath, "/Output", "/pcv.png", sep = ""),
+       width = 30, 
+       height = 18, 
+       units = "cm")
+
+df <- PCV7_IPD2 %>%
+  group_by(YEAR, State, Age_Group) %>%
+  summarise(mean = mean(PCV_Coverage))
+
+### ---------- Influenza and hospitalization rate
+
+ggplot(PCV7_IPD2, aes(x=Influenza, y=IPD/Population, color=Age_Group2)) +
+  geom_point() + 
+#  geom_smooth(method=lm, se=FALSE, fullrange=TRUE) +
+  scale_color_manual(values=c('#A6CEE3','#1F78B4', '#B2DF89', '#4DA547'),
+                     name="Age group")+
+  theme(legend.position="top")+
+  labs(title="Scatter plot: rate of influenza and rate of IPD-related hospitalization",
+       x="Rate of influenza", y = "Rate of IPD-related hospitalization")+
+  theme_classic(base_size = 14)
+ggsave(paste(fpath, "/Output", "/scatter_flue_hostrate.png", sep = ""),
+       width = 30, 
+       height = 18, 
+       units = "cm")
+
+### ---------- PCV and hospitalization rate
+
+ggplot(PCV7_IPD2, aes(x=PCV_Coverage, y=IPD/Population, color=Age_Group2)) +
+  geom_point() + 
+  scale_color_manual(values=c('#A6CEE3','#1F78B4', '#B2DF89', '#4DA547'),
+                     name="Age group")+
+  theme(legend.position="top")+
+  labs(title="Scatter plot: PCV7 coverage rate and rate of IPD-related hospitalization",
+       x="Rate of influenza", y = "Rate of IPD-related hospitalization")+
+  theme_classic(base_size = 14)
+ggsave(paste(fpath, "/Output", "/scatter_pcv_cov_hostrate.png", sep = ""),
+       width = 30, 
+       height = 18, 
+       units = "cm")
+
+### ---- Scale the influenza rate
+before_log_trans <- PCV7_IPD2$Influenza
+after_log_trans <- log(PCV7_IPD2$Influenza)
+
+ggplot(PCV7_IPD2, aes(x=Influenza)) + geom_histogram()+ 
+  geom_histogram(color="black", fill="white")+ 
+  geom_vline(aes(xintercept=mean(Influenza)),
+             color="blue", linetype="dashed", size=1)+
+  labs(title="Raw Influenza Rate",
+       x="Raw Influenza Rate", y = "Count")
+ggsave(paste(fpath, "/Output", "/raw_flu_rate.png", sep = ""),
+       width = 30, 
+       height = 18, 
+       units = "cm")
+
+ggplot(PCV7_IPD2, aes(x=log(Influenza))) + geom_histogram()+ 
+  geom_histogram(color="black", fill="white")+ 
+  geom_vline(aes(xintercept=mean(Influenza)),
+             color="blue", linetype="dashed", size=1)+
+  labs(title="Log-transformed Influenza Rate",
+       x="Log-transformed Influenza Rate", y = "Count")
+ggsave(paste(fpath, "/Output", "/logtrans_flu_rate.png", sep = ""),
+       width = 30, 
+       height = 18, 
+       units = "cm")
+
+################################################################################
+########################## Part III:  Overdispersion  ##########################
+################################################################################
+
+# ------------ IPD count and coverage ------------ #
+PCV7_IPD2_factor = cut(PCV7_IPD2$PCV_Coverage, 
+                       breaks=c(0, seq(from=min(PCV7_IPD2$PCV_Coverage), 
+                                       to=max(PCV7_IPD2$PCV_Coverage), by=10), Inf),
+                       right = FALSE) 
+
+x = aggregate(PCV7_IPD2$PCV_Coverage, by=list(Width=PCV7_IPD2_factor), mean)$x  
+y = aggregate(PCV7_IPD2$IPD, by=list(Width=PCV7_IPD2_factor), mean)$x 
+sample_var <- aggregate(PCV7_IPD2$IPD, by=list(Width=PCV7_IPD2_factor), var)
+# plot the mean of satellites by mean Width within each factor level.
+
+plot(x, y, ylab="IPD count", xlab="PCV Coverage", axes=FALSE, pch=16, 
+     main="Grouped Mean Numbers of IPD Counts", sub="With GAM smoothed fit")  
+axis(2, at=seq(0, max(y), 10)) 
+axis(1, at=seq(0, max(x), 10)) 
+legend(23, 100, c("Mean counts, for 10 PCV coverage categories"), pch=16) 
+# adding a smoothed line to mean outcomes vs
+library(mgcv) 
+crab.gam.fit = gam(y~s(x, k=4, fx=TRUE), family=poisson(link=log)) 
+lines(x, fitted(crab.gam.fit))  
+
+
+# ------------ IPD prevelence rate and coverage ------------ #
+png(file=paste(fpath, "/Output", "/prevalence_rate_coverage.png", sep = ""),
+    width=12, height=6, units="in")
+PCV7_IPD2_factor = cut(PCV7_IPD2$PCV_Coverage, 
+                       breaks=c(0, seq(from=min(PCV7_IPD2$PCV_Coverage), 
+                                       to=max(PCV7_IPD2$PCV_Coverage), by=10), Inf),
+                       right = FALSE) 
+
+x = aggregate(PCV7_IPD2$PCV_Coverage, by=list(Width=PCV7_IPD2_factor), mean)$x  
+y = aggregate(PCV7_IPD2$IPD/PCV7_IPD$Population, by=list(Width=PCV7_IPD2_factor), mean)$x 
+y = round(y*100000, 1)
+sample_var <- aggregate(PCV7_IPD2$IPD/PCV7_IPD2$Population, by=list(Width=PCV7_IPD2_factor), var)
+# plot the mean of satellites by mean Width within each factor level.
+
+plot(x, y, ylab="IPD prevalence rate per 100,000 Population", xlab="PCV Coverage", axes=FALSE, pch=16, 
+     main="Grouped Mean of IPD Prevalence Rate per 100,000 Population \nWithin 10 PCV Coverage Categories", sub="With GAM smoothed fit")  
+axis(2, at=round(seq(0, max(y), length.out = 10), 1)) 
+axis(1, at=seq(0, max(x), 10)) 
+legend(23, 100, c("Mean counts, for 10 PCV coverage categories"), pch=16) 
+# adding a smoothed line to mean outcomes vs
+library(mgcv) 
+crab.gam.fit = gam(y~s(x, k=4, fx=TRUE), family=poisson(link=log)) 
+lines(x, fitted(crab.gam.fit))  
+dev.off()
+
+PCV7_IPD3 <- PCV7_IPD2 %>%
+  mutate(PCV7_IPD2_factor = PCV7_IPD2_factor) %>%
+  group_by(PCV7_IPD2_factor) %>%
+  summarise(
+    N = n(),
+    sum_IPD = sum(IPD),
+    mean_IPD = mean(IPD),
+    var_IPD = var(IPD)
+  )
+summary(PCV7_IPD2$PCV_Coverage)
+boxplot(PCV7_IPD2$PCV_Coverage)
+
+################################################################################
+########################## Part IV:  Model builds  ##########################
+################################################################################
+PCV7_IPD2$logInflenza <- log(PCV7_IPD2$Influenza)
+PCV7_IPD5 <- PCV7_IPD2
+
+PCV7_IPD5$logInflenza[!is.finite(PCV7_IPD5$logInflenza)] = NA
+PCV7_IPD5 <- PCV7_IPD5[complete.cases(PCV7_IPD5$logInflenza),]
+# 
+# poi.lm1 <- glm(IPD ~ 
+#                  PCV_Coverage +
+#                  Age_Group +
+#                  Influenza + 
+#                  YEAR +
+#                  State +
+#                  PCV_Coverage*Age_Group +
+#                  PCV_Coverage*Influenza +
+#                  PCV_Coverage*YEAR +
+#                  PCV_Coverage*State +
+#                  Age_Group*Influenza +
+#                  Age_Group*YEAR +
+#                  Age_Group*State +
+#                  Influenza*YEAR +
+#                  Influenza*State +
+#                  YEAR*State +
+#                  Influenza*YEAR*State	 +
+#                  Age_Group*YEAR*State	+
+#                  Age_Group*Influenza*State +
+#                  Age_Group*Influenza*YEAR	+
+#                  PCV_Coverage*YEAR*State	+
+#                  PCV_Coverage*Influenza*State	+
+#                  PCV_Coverage*Influenza*YEAR +
+#                  PCV_Coverage*Age_Group*State	+
+#                  PCV_Coverage*Age_Group*YEAR +
+#                  PCV_Coverage*Age_Group*Influenza	+
+#                  PCV_Coverage*Age_Group*Influenza*YEAR +	
+#                  PCV_Coverage*Age_Group*Influenza*State	+
+#                  PCV_Coverage*Age_Group*YEAR*State +
+#                  PCV_Coverage*Influenza*YEAR*State +
+#                  Age_Group*Influenza*YEAR*State	+
+#                  PCV_Coverage*Age_Group*Influenza*YEAR*State,
+#                offset = log(Population), 
+#                data = PCV7_IPD2, 
+#                family = poisson(link=log))
+# summary(poi.lm1)
+
+### --------- Model 1 ------------- ###
+poi.lm1 <- glm(IPD ~ 
+                 PCV_Coverage +
+                 Age_Group +
+                 logInflenza + 
+                 PCV_Coverage*Age_Group +
+                 PCV_Coverage*logInflenza +
+                 Age_Group*logInflenza +
+                 PCV_Coverage*Age_Group*logInflenza,             
+               offset = log(Population), 
+             data = PCV7_IPD5, 
+             family = poisson(link=log))
+summary(poi.lm1)
+logLik( poi.lm1 )
+
+# poi.lm1.od <- glm(IPD ~ 
+#                     PCV_Coverage +
+#                     Age_Group +
+#                     Influenza + 
+#                     PCV_Coverage*Age_Group +
+#                     PCV_Coverage*Influenza +
+#                     Age_Group*Influenza +
+#                     PCV_Coverage*Age_Group*Influenza,
+#                offset = log(Population), 
+#                data = PCV7_IPD2, 
+#                family=quasipoisson(link="log"), 
+#                start=coef(poi.lm1))
+# summary(poi.lm1.od)
+# logLik( poi.lm1.od )
+
+
+poi.lm1.nb <- glm.nb(IPD ~ 
+                       PCV_Coverage +
+                       Age_Group +
+                       logInflenza + 
+                       PCV_Coverage*Age_Group +
+                       PCV_Coverage*logInflenza +
+                       Age_Group*logInflenza +
+                       PCV_Coverage*Age_Group*logInflenza + 
+                      offset(log(Population)),
+                  data = PCV7_IPD5)
+summary(poi.lm1.nb)
+logLik( poi.lm1.nb )
+
+
+chitest <- -2*logLik( poi.lm1 ) -  (-2*logLik( poi.lm1.nb ))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+### --------- Model 2 ------------- ###
+poi.lm2 <- glm(IPD ~ 
+                 PCV_Coverage +
+                 Age_Group +
+                 logInflenza + 
+                 PCV_Coverage*Age_Group +
+                 PCV_Coverage*logInflenza +
+                 Age_Group*logInflenza ,             
+               offset = log(Population), 
+               data = PCV7_IPD5, 
+               family = poisson(link=log))
+summary(poi.lm2)
+logLik(poi.lm2)
+
+# poi.lm2.od <- glm(IPD ~ 
+#                     PCV_Coverage +
+#                     Age_Group +
+#                     Influenza + 
+#                     PCV_Coverage*Age_Group +
+#                     PCV_Coverage*Influenza +
+#                     Age_Group*Influenza,
+#                   offset = log(Population), 
+#                   data = PCV7_IPD2, 
+#                   family=quasipoisson(link="log"), 
+#                   start=coef(poi.lm2))
+# summary(poi.lm2.od)
+# logLik(poi.lm2.od)
+
+
+poi.lm2.nb <- glm.nb(IPD ~ 
+                       PCV_Coverage +
+                       Age_Group +
+                       logInflenza + 
+                       PCV_Coverage*Age_Group +
+                       PCV_Coverage*logInflenza +
+                       Age_Group*logInflenza +
+                       offset(log(Population)),
+                     data = PCV7_IPD5)
+summary(poi.lm2.nb)
+logLik(poi.lm2.nb)
+
+chitest <- -2*logLik(poi.lm2) -  (-2*logLik( poi.lm2.nb ))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+### --------- Model 3 ------------- ###
+poi.lm3 <- glm(IPD ~ 
+                 PCV_Coverage +
+                 Age_Group +
+                 logInflenza + 
+                 PCV_Coverage*logInflenza +
+                 Age_Group*logInflenza ,             
+               offset = log(Population), 
+               data = PCV7_IPD5, 
+               family = poisson(link=log))
+summary(poi.lm3)
+logLik(poi.lm3)
+
+# poi.lm3.od <- glm(IPD ~ 
+#                     PCV_Coverage +
+#                     Age_Group +
+#                     Influenza + 
+#                     PCV_Coverage*Influenza +
+#                     Age_Group*Influenza,
+#                   offset = log(Population), 
+#                   data = PCV7_IPD2, 
+#                   family=quasipoisson(link="log"), 
+#                   start=coef(poi.lm3))
+# summary(poi.lm3.od)
+# logLik(poi.lm3.od)
+
+
+poi.lm3.nb <- glm.nb(IPD ~ 
+                       PCV_Coverage +
+                       Age_Group +
+                       logInflenza + 
+                       PCV_Coverage*logInflenza +
+                       Age_Group*logInflenza +
+                       offset(log(Population)),
+                     data = PCV7_IPD5)
+summary(poi.lm3.nb)
+logLik(poi.lm3.nb)
+
+chitest <- -2*logLik(poi.lm3) - (-2*logLik( poi.lm3.nb))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+
+### --------- Model 4 ------------- ###
+poi.lm4 <- glm(IPD ~ 
+                 PCV_Coverage +
+                 Age_Group +
+                 logInflenza + 
+                 PCV_Coverage*Age_Group +
+                 Age_Group*logInflenza,             
+               offset = log(Population), 
+               data = PCV7_IPD5, 
+               family = poisson(link=log))
+summary(poi.lm4)
+logLik(poi.lm4)
+
+# poi.lm4.od <- glm(IPD ~ 
+#                     PCV_Coverage +
+#                     Age_Group +
+#                     Influenza + 
+#                     PCV_Coverage*Age_Group +
+#                     Age_Group*Influenza,
+#                   offset = log(Population), 
+#                   data = PCV7_IPD2, 
+#                   family=quasipoisson(link="log"), 
+#                   start=coef(poi.lm4))
+# summary(poi.lm4.od)
+# logLik(poi.lm4.od)
+
+poi.lm4.nb <- glm.nb(IPD ~ 
+                       PCV_Coverage +
+                       Age_Group +
+                       logInflenza + 
+                       PCV_Coverage*Age_Group +
+                       Age_Group*logInflenza +
+                       offset(log(Population)),
+                     data = PCV7_IPD5)
+summary(poi.lm4.nb)
+logLik(poi.lm4.nb)
+
+chitest <- -2*logLik(poi.lm4) - (-2*logLik( poi.lm4.nb))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+
+### --------- Model 5 ------------- ###
+poi.lm5 <- glm(IPD ~ 
+                 PCV_Coverage +
+                 Age_Group +
+                 logInflenza + 
+                 PCV_Coverage*Age_Group +
+                 PCV_Coverage*logInflenza,             
+               offset = log(Population), 
+               data = PCV7_IPD5, 
+               family = poisson(link=log))
+summary(poi.lm5)
+logLik(poi.lm5)
+
+# poi.lm5.od <- glm(IPD ~ 
+#                     PCV_Coverage +
+#                     Age_Group +
+#                     Influenza + 
+#                     PCV_Coverage*Age_Group +
+#                     PCV_Coverage*Influenza,
+#                   offset = log(Population), 
+#                   data = PCV7_IPD2_CC, 
+#                   family=quasipoisson(link="log"), 
+#                   start=coef(poi.lm5))
+# summary(poi.lm5.od)
+# logLik(poi.lm5.od)
+
+poi.lm5.nb <- glm.nb(IPD ~ 
+                       PCV_Coverage +
+                       Age_Group +
+                       logInflenza + 
+                       PCV_Coverage*Age_Group +
+                       PCV_Coverage*logInflenza +
+                       offset(log(Population)),
+                     data = PCV7_IPD5)
+summary(poi.lm5.nb)
+logLik(poi.lm5.nb)
+
+chitest <- -2*logLik(poi.lm5) - (-2*logLik( poi.lm5.nb))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+
+### --------- Model 6 ------------- ###
+poi.lm6 <- glm(IPD ~ 
+                 PCV_Coverage +
+                 Age_Group +
+                 logInflenza + 
+                 Age_Group*logInflenza,             
+               offset = log(Population), 
+               data = PCV7_IPD5, 
+               family = poisson(link=log))
+summary(poi.lm6)
+logLik(poi.lm6)
+
+# poi.lm6.od <- glm(IPD ~ 
+#                     PCV_Coverage +
+#                     Age_Group +
+#                     Influenza + 
+#                     Age_Group*Influenza,
+#                   offset = log(Population), 
+#                   data = PCV7_IPD2, 
+#                   family=quasipoisson(link="log"), 
+#                   start=coef(poi.lm6))
+# summary(poi.lm6.od)
+# logLik(poi.lm6.od)
+
+poi.lm6.nb <- glm.nb(IPD ~ 
+                       PCV_Coverage +
+                       Age_Group +
+                       logInflenza + 
+                       Age_Group*logInflenza +
+                       offset(log(Population)),
+                     data = PCV7_IPD5)
+summary(poi.lm6.nb)
+logLik(poi.lm6.nb)
+
+chitest <- -2*logLik(poi.lm6) - (-2*logLik( poi.lm6.nb))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+
+### --------- Model 7 ------------- ###
+poi.lm7 <- glm(IPD ~ 
+                 PCV_Coverage +
+                 Age_Group +
+                 logInflenza + 
+                 PCV_Coverage*logInflenza,             
+               offset = log(Population), 
+               data = PCV7_IPD5, 
+               family = poisson(link=log))
+summary(poi.lm7)
+logLik(poi.lm7)
+
+# poi.lm7.od <- glm(IPD ~ 
+#                     PCV_Coverage +
+#                     Age_Group +
+#                     Influenza + 
+#                     PCV_Coverage*Influenza,
+#                   offset = log(Population), 
+#                   data = PCV7_IPD2, 
+#                   family=quasipoisson(link="log"), 
+#                   start=coef(poi.lm7))
+# summary(poi.lm7.od)
+# logLik(poi.lm7.od)
+
+poi.lm7.nb <- glm.nb(IPD ~ 
+                       PCV_Coverage +
+                       Age_Group +
+                       logInflenza + 
+                       PCV_Coverage*logInflenza +
+                       offset(log(Population)),
+                     data = PCV7_IPD5)
+summary(poi.lm7.nb)
+logLik(poi.lm7.nb)
+
+chitest <- -2*logLik(poi.lm7) - (-2*logLik( poi.lm7.nb))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+### --------- Model 8 ------------- ###
+poi.lm8 <- glm(IPD ~ 
+                 PCV_Coverage +
+                 Age_Group +
+                 logInflenza + 
+                 PCV_Coverage*Age_Group,             
+               offset = log(Population), 
+               data = PCV7_IPD5, 
+               family = poisson(link=log))
+summary(poi.lm8)
+logLik(poi.lm8)
+
+# poi.lm8.od <- glm(IPD ~ 
+#                     PCV_Coverage +
+#                     Age_Group +
+#                     Influenza + 
+#                     PCV_Coverage*Age_Group,
+#                   offset = log(Population), 
+#                   data = PCV7_IPD2_CC, 
+#                   family=quasipoisson(link="log"), 
+#                   start=coef(poi.lm8))
+# summary(poi.lm8.od)
+# logLik(poi.lm8.od)
+
+poi.lm8.nb <- glm.nb(IPD ~ 
+                       PCV_Coverage +
+                       Age_Group +
+                       logInflenza + 
+                       PCV_Coverage*Age_Group +
+                       offset(log(Population)),
+                     data = PCV7_IPD5)
+summary(poi.lm8.nb)
+logLik(poi.lm8.nb)
+
+chitest <- -2*logLik(poi.lm8) - (-2*logLik( poi.lm8.nb))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+
+### --------- Model 9 ------------- ###
+poi.lm9 <- glm(IPD ~ 
+                 Age_Group +
+                 logInflenza + 
+                 logInflenza*Age_Group,             
+               offset = log(Population), 
+               data = PCV7_IPD5, 
+               family = poisson(link=log))
+summary(poi.lm9)
+logLik(poi.lm9)
+
+# poi.lm9.od <- glm(IPD ~ 
+#                     Age_Group +
+#                     Influenza + 
+#                     Influenza*Age_Group,
+#                   offset = log(Population), 
+#                   data = PCV7_IPD2, 
+#                   family=quasipoisson(link="log"), 
+#                   start=coef(poi.lm9))
+# summary(poi.lm9.od)
+# logLik(poi.lm9.od)
+
+poi.lm9.nb <- glm.nb(IPD ~ 
+                       Age_Group +
+                       logInflenza + 
+                       logInflenza*Age_Group +
+                       offset(log(Population)),
+                     data = PCV7_IPD5)
+summary(poi.lm9.nb)
+logLik(poi.lm9.nb)
+
+chitest <- -2*logLik(poi.lm9) - (-2*logLik( poi.lm9.nb))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+
+### --------- Model 10 ------------- ###
+poi.lm10 <- glm(IPD ~ 
+                 PCV_Coverage +
+                  logInflenza + 
+                  logInflenza*PCV_Coverage,             
+               offset = log(Population), 
+               data = PCV7_IPD5, 
+               family = poisson(link=log))
+summary(poi.lm10)
+logLik(poi.lm10)
+
+# poi.lm10.od <- glm(IPD ~ 
+#                     PCV_Coverage +
+#                     Influenza + 
+#                     Influenza*PCV_Coverage,
+#                   offset = log(Population), 
+#                   data = PCV7_IPD2, 
+#                   family=quasipoisson(link="log"), 
+#                   start=coef(poi.lm10))
+# summary(poi.lm10.od)
+# logLik(poi.lm10.od)
+
+poi.lm10.nb <- glm.nb(IPD ~ 
+                        PCV_Coverage +
+                        logInflenza + 
+                        logInflenza*PCV_Coverage +
+                       offset(log(Population)),
+                     data = PCV7_IPD5)
+summary(poi.lm10.nb)
+logLik(poi.lm10.nb)
+
+chitest <- -2*logLik(poi.lm10) - (-2*logLik( poi.lm10.nb))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+
+### --------- Model 11 ------------- ###
+poi.lm11 <- glm(IPD ~ 
+                  PCV_Coverage +
+                  Age_Group + 
+                  Age_Group*PCV_Coverage,             
+                offset = log(Population), 
+                data = PCV7_IPD5, 
+                family = poisson(link=log))
+summary(poi.lm11)
+logLik(poi.lm11)
+
+# poi.lm11.od <- glm(IPD ~ 
+#                      PCV_Coverage +
+#                      Age_Group + 
+#                      Age_Group*PCV_Coverage,
+#                    offset = log(Population), 
+#                    data = PCV7_IPD2, 
+#                    family=quasipoisson(link="log"), 
+#                    start=coef(poi.lm11))
+# summary(poi.lm11.od)
+# logLik(poi.lm11.od)
+
+poi.lm11.nb <- glm.nb(IPD ~ 
+                        PCV_Coverage +
+                        Age_Group + 
+                        Age_Group*PCV_Coverage +
+                        offset(log(Population)),
+                      data = PCV7_IPD5)
+summary(poi.lm11.nb)
+logLik(poi.lm11.nb)
+
+chitest <- -2*logLik(poi.lm11) - (-2*logLik( poi.lm11.nb))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+
+### --------- Model 12 ------------- ###
+poi.lm12 <- glm(IPD ~ 
+                  PCV_Coverage +
+                  Age_Group + 
+                  logInflenza,             
+                offset = log(Population), 
+                data = PCV7_IPD5, 
+                family = poisson(link=log))
+summary(poi.lm12)
+logLik(poi.lm12)
+
+# poi.lm12.od <- glm(IPD ~ 
+#                      PCV_Coverage +
+#                      Age_Group + 
+#                      Influenza,
+#                    offset = log(Population), 
+#                    data = PCV7_IPD2_CC, 
+#                    family=quasipoisson(link="log"), 
+#                    start=coef(poi.lm12))
+# summary(poi.lm12.od)
+# logLik(poi.lm12.od)
+
+poi.lm12.nb <- glm.nb(IPD ~ 
+                        PCV_Coverage +
+                        Age_Group + 
+                        logInflenza +
+                        offset(log(Population)),
+                      data = PCV7_IPD5)
+summary(poi.lm12.nb)
+logLik(poi.lm12.nb)
+
+chitest <- -2*logLik(poi.lm12) - (-2*logLik( poi.lm12.nb))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+
+### --------- Model 13 ------------- ###
+poi.lm13 <- glm(IPD ~ 
+                  Age_Group + 
+                  logInflenza,             
+                offset = log(Population), 
+                data = PCV7_IPD5, 
+                family = poisson(link=log))
+summary(poi.lm13)
+logLik(poi.lm13)
+
+# poi.lm13.od <- glm(IPD ~ 
+#                      Age_Group + 
+#                      Influenza,
+#                    offset = log(Population), 
+#                    data = PCV7_IPD2, 
+#                    family=quasipoisson(link="log"), 
+#                    start=coef(poi.lm13))
+# summary(poi.lm13.od)
+# logLik(poi.lm13.od)
+
+poi.lm13.nb <- glm.nb(IPD ~ 
+                        Age_Group + 
+                        logInflenza +
+                        offset(log(Population)),
+                      data = PCV7_IPD5)
+summary(poi.lm13.nb)
+logLik(poi.lm13.nb)
+
+chitest <- -2*logLik(poi.lm13) - (-2*logLik( poi.lm13.nb))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+
+### --------- Model 14 ------------- ###
+poi.lm14 <- glm(IPD ~ 
+                  PCV_Coverage +
+                  logInflenza,             
+                offset = log(Population), 
+                data = PCV7_IPD5, 
+                family = poisson(link=log))
+summary(poi.lm14)
+logLik(poi.lm14)
+
+# poi.lm14.od <- glm(IPD ~ 
+#                      PCV_Coverage +
+#                      Influenza,
+#                    offset = log(Population), 
+#                    data = PCV7_IPD2, 
+#                    family=quasipoisson(link="log"), 
+#                    start=coef(poi.lm14))
+# summary(poi.lm14.od)
+# logLik(poi.lm14.od)
+
+poi.lm14.nb <- glm.nb(IPD ~ 
+                        PCV_Coverage +
+                        logInflenza +
+                        offset(log(Population)),
+                      data = PCV7_IPD5)
+summary(poi.lm14.nb)
+logLik(poi.lm14.nb)
+
+chitest <- -2*logLik(poi.lm14) - (-2*logLik( poi.lm14.nb))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+
+### --------- Model 15 ------------- ###
+poi.lm15 <- glm(IPD ~ 
+                  PCV_Coverage +
+                  Age_Group,             
+                offset = log(Population), 
+                data = PCV7_IPD5, 
+                family = poisson(link=log))
+summary(poi.lm15)
+logLik(poi.lm15)
+
+# poi.lm15.od <- glm(IPD ~ 
+#                      PCV_Coverage +
+#                      Age_Group,
+#                    offset = log(Population), 
+#                    data = PCV7_IPD5, 
+#                    family=quasipoisson(link="log"), 
+#                    start=coef(poi.lm15))
+# summary(poi.lm15.od)
+# logLik(poi.lm15.od)
+
+poi.lm15.nb <- glm.nb(IPD ~ 
+                        PCV_Coverage +
+                        Age_Group +
+                        offset(log(Population)),
+                      data = PCV7_IPD5)
+summary(poi.lm15.nb)
+logLik(poi.lm15.nb)
+
+chitest <- -2*logLik(poi.lm15) - (-2*logLik( poi.lm15.nb))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+
+### --------- Model 16 ------------- ###
+poi.lm16 <- glm(IPD ~ 
+                  logInflenza ,             
+                offset = log(Population), 
+                data = PCV7_IPD5, 
+                family = poisson(link=log))
+summary(poi.lm16)
+logLik(poi.lm16)
+
+# poi.lm16.od <- glm(IPD ~ 
+#                      Influenza,
+#                    offset = log(Population), 
+#                    data = PCV7_IPD2, 
+#                    family=quasipoisson(link="log"), 
+#                    start=coef(poi.lm16))
+# summary(poi.lm16.od)
+# logLik(poi.lm16.od)
+
+poi.lm16.nb <- glm.nb(IPD ~ 
+                        logInflenza+
+                        offset(log(Population)),
+                      data = PCV7_IPD5)
+summary(poi.lm16.nb)
+logLik(poi.lm16.nb)
+
+chitest <- -2*logLik(poi.lm16) - (-2*logLik( poi.lm16.nb))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+
+### --------- Model 17 ------------- ###
+poi.lm17 <- glm(IPD ~ 
+                  Age_Group ,             
+                offset = log(Population), 
+                data = PCV7_IPD5, 
+                family = poisson(link=log))
+summary(poi.lm17)
+logLik(poi.lm17)
+
+# poi.lm17.od <- glm(IPD ~ 
+#                      Age_Group,
+#                    offset = log(Population), 
+#                    data = PCV7_IPD2, 
+#                    family=quasipoisson(link="log"), 
+#                    start=coef(poi.lm17))
+# summary(poi.lm17.od)
+# logLik(poi.lm17.od)
+
+poi.lm17.nb <- glm.nb(IPD ~ 
+                        Age_Group+
+                        offset(log(Population)),
+                      data = PCV7_IPD5)
+summary(poi.lm17.nb)
+logLik(poi.lm17.nb)
+
+chitest <- -2*logLik(poi.lm17) - (-2*logLik( poi.lm17.nb))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+
+### --------- Model 18 ------------- ###
+poi.lm18 <- glm(IPD ~ 
+                  PCV_Coverage ,             
+                offset = log(Population), 
+                data = PCV7_IPD5, 
+                family = poisson(link=log))
+summary(poi.lm18)
+logLik(poi.lm18)
+
+# poi.lm18.od <- glm(IPD ~ 
+#                      PCV_Coverage,
+#                    offset = log(Population), 
+#                    data = PCV7_IPD2, 
+#                    family=quasipoisson(link="log"), 
+#                    start=coef(poi.lm18))
+# summary(poi.lm18.od)
+# logLik(poi.lm18.od)
+
+poi.lm18.nb <- glm.nb(IPD ~ 
+                        PCV_Coverage+
+                        offset(log(Population)),
+                      data = PCV7_IPD5)
+summary(poi.lm18.nb)
+logLik(poi.lm18.nb)
+
+chitest <- -2*logLik(poi.lm18) - (-2*logLik( poi.lm18.nb))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+
+### --------- Model 19 ------------- ###
+poi.lm19 <- glm(IPD ~ 1 ,             
+                offset = log(Population), 
+                data = PCV7_IPD5, 
+                family = poisson(link=log))
+summary(poi.lm19)
+logLik(poi.lm19)
+
+# poi.lm19.od <- glm(IPD ~ 1,
+#                    offset = log(Population), 
+#                    data = PCV7_IPD2, 
+#                    family=quasipoisson(link="log"), 
+#                    start=coef(poi.lm19))
+# summary(poi.lm19.od)
+# logLik(poi.lm19.od)
+
+poi.lm19.nb <- glm.nb(IPD ~ 1+
+                        offset(log(Population)),
+                      data = PCV7_IPD5)
+summary(poi.lm19.nb)
+logLik(poi.lm19.nb)
+
+chitest <- -2*logLik(poi.lm19) - (-2*logLik( poi.lm19.nb))
+chitest
+1 - pchisq( chitest, df=1  )
+(1 - pchisq(chitest, df=1  ))/2
+1 - pnorm(sqrt(chitest))
+
+-2*logLik(poi.lm2.nb) - -2*logLik(poi.lm1.nb)
+
+###---- Model pick
+mod1to2 <- -2*logLik(poi.lm2.nb) - -2*logLik(poi.lm1.nb)
+1-pchisq(mod1to2[[1]], 3)
+
+mod2to3 <- -2*logLik(poi.lm3.nb) - -2*logLik(poi.lm2.nb)
+1-pchisq(mod2to3[[1]], 3)
+
+mod2to4 <- -2*logLik(poi.lm4.nb) - -2*logLik(poi.lm2.nb)
+1-pchisq(mod2to4[[1]], 1)
+
+mod2to5 <- -2*logLik(poi.lm5.nb) - -2*logLik(poi.lm2.nb)
+1-pchisq(mod2to5[[1]], 3)
+
+mod4to6 <- -2*logLik(poi.lm6.nb) - -2*logLik(poi.lm4.nb)
+1-pchisq(mod4to6[[1]], 3)
+
+mod4to8 <- -2*logLik(poi.lm8.nb) - -2*logLik(poi.lm4.nb)
+1-pchisq(mod4to8[[1]], 3)
+
+mod8to11 <- -2*logLik(poi.lm11.nb) - -2*logLik(poi.lm8.nb)
+1-pchisq(mod8to11[[1]], 1)
+
+mod8to12 <- -2*logLik(poi.lm12.nb) - -2*logLik(poi.lm8.nb)
+1-pchisq(mod8to12[[1]], 3)
+
+
+#install.packages("car")
+library(car)
+plot(cookd(poi.lm8.nb))
+sort(cooks.distance(poi.lm8.nb))
+
+inflm.SR <- influence.measures(poi.lm8.nb)
+which(apply(inflm.SR$is.inf, 1, any))
+
+summary(inflm.SR) # only these
+inflm.SR          # all
+
+plot(rstudent(poi.lm8.nb) ~ hatvalues(poi.lm8.nb)) # recommended by some
+
+jpeg(paste(fpath, "/Output", "/diag_plot.jpeg", sep = ""), width = 800, height = 800)
+par(mfrow=c(2,2))
+plot(poi.lm8.nb) # an enhanced version of that via plot(<lm>)
+dev.off()
+
+################################################################################
+################################################################################
+################################################################################
+
+
+poi.lm1 <- glm(IPD ~ 
+                 PCV_Coverage +
+                 Age_Group +
+                 Influenza + 
+                 YEAR +
+                 State,
+               offset = log(Population), 
+               data = PCV7_IPD2, 
+               family = poisson(link=log))
+summary(lm1)
+
+poi.lm2 <- glm(IPD ~ PCV_Coverage +
+             Age_Group +
+             Influenza + 
+             YEAR , offset = log(Population), data = PCV7_IPD2, family = poisson())
+summary(lm2)
+chitest <- -2*logLik( lm2 ) -  (-2*logLik( lm1 ))
+1 - pchisq( chitest, df=12  )
+
+# estimate theta and fix phi to 1; recommended
+# consistent with SAS PROC GENMOD with dist=negbin
+ng.lm1 <- glm.nb(IPD ~ PCV_Coverage +
+                   Age_Group +
+                   Influenza + 
+                   YEAR +
+                   State +
+                   offset (log(Population)), 
+                 data=PCV7_IPD2, 
+                 link=log) 
+summary(ng.lm1)
+
+
+getCI(lm1)
+
+PCV7_IPD2 <- PCV7_IPD %>%
+  select(IPD, Age_Group, Population) %>%
+  group_by(Age_Group) %>%
+  summarise(IPD_total = sum(IPD),
+            Population_total = sum(Population))
+lm2 <- glm(IPD_total~Age_Group, offset = log(Population_total), data = PCV7_IPD2, family = poisson())
+
+dim(PCV7_IPD)
+PCV7_IPD[1:10,]
+summary(PCV7_IPD$Influenza)
+
+sum_tb <- PCV7_IPD %>%
+  group_by(YEAR, State, Age_Group) %>%
+  summarise(n = n())
+
+unique(PCV7_IPD$YEAR)
+length(unique(PCV7_IPD$State))
+length(unique(PCV7_IPD$Age_Group))
+
+ftable(xtabs(IPD~YEAR+Age_Group,data=PCV7_IPD))
+
+lm1 <- lm(IPD/Population ~ ., data=PCV7_IPD)
+summary(lm1)
+
+lm2 <- lm(IPD ~ ., data=PCV7_IPD)
+summary(lm2)
+
+################################################################################
+#######################Part VI. Final model 8 analysis #########################
+################################################################################
+
+summary(poi.lm8.nb)
+getCI(poi.lm8.nb)
+
+#1. 
+
+exp(10*(coef(poi.lm8.nb)[2] - 1.96* sqrt(vcov(poi.lm8.nb)[2,2])))
+exp(10*(coef(poi.lm8.nb)[2] + 1.96* sqrt(vcov(poi.lm8.nb)[2,2])))
+
+#2
+
+se <- sqrt(vcov(poi.lm8.nb)[2,2]+vcov(poi.lm8.nb)[7,7]+2*vcov(poi.lm8.nb)[2,7])
+
+exp(10*(coef(poi.lm8.nb)[2]+coef(poi.lm8.nb)[7]-1.96*se))
+exp(10*(coef(poi.lm8.nb)[2]+coef(poi.lm8.nb)[7]+1.96*se))
+
+#3
+
+se <- sqrt(vcov(poi.lm8.nb)[2,2]+vcov(poi.lm8.nb)[8,8]+2*vcov(poi.lm8.nb)[2,8])
+
+exp(10*(coef(poi.lm8.nb)[2]+coef(poi.lm8.nb)[8]-1.96*se))
+exp(10*(coef(poi.lm8.nb)[2]+coef(poi.lm8.nb)[8]+1.96*se))
+
+#4
+
+se <- sqrt(vcov(poi.lm8.nb)[2,2]+vcov(poi.lm8.nb)[9,9]+2*vcov(poi.lm8.nb)[2,9])
+
+exp(10*(coef(poi.lm8.nb)[2]+coef(poi.lm8.nb)[9]-1.96*se))
+exp(10*(coef(poi.lm8.nb)[2]+coef(poi.lm8.nb)[9]+1.96*se))
+
+
+
+# Age and PCV coverage 
+PCV7_IPD9 <- PCV7_IPD
+PCV7_IPD9$host_perc <- PCV7_IPD9$IPD/PCV7_IPD9$Population
+PCV7_IPD9$Age_Group2 <- ""
+PCV7_IPD9$Age_Group2[PCV7_IPD9$Age_Group == 1] <- "5-17 yr" 
+PCV7_IPD9$Age_Group2[PCV7_IPD9$Age_Group == 2] <- "18-39 yr" 
+PCV7_IPD9$Age_Group2[PCV7_IPD9$Age_Group == 3] <- "40-64 yr" 
+PCV7_IPD9$Age_Group2[PCV7_IPD9$Age_Group == 4] <- "65 and over" 
+PCV7_IPD9$Age_Group2 <- factor(PCV7_IPD9$Age_Group2)
+PCV7_IPD9$Age_Group2 = factor(PCV7_IPD9$Age_Group2,levels=levels(PCV7_IPD9$Age_Group2)[c(4, 2, 1, 3)])
+
+PCV7_IPD9$logInflenza <- log(PCV7_IPD9$Influenza)
+
+PCV7_IPD9$logInflenza[!is.finite(PCV7_IPD9$logInflenza)] = NA
+PCV7_IPD9 <- PCV7_IPD9[complete.cases(PCV7_IPD9$logInflenza),]
+
+
+poi.lm8.nb.2 <- glm.nb(IPD ~ 
+                       PCV_Coverage +
+                         Age_Group2 +
+                       logInflenza + 
+                       PCV_Coverage*Age_Group2 +
+                       offset(log(Population)),
+                     data = PCV7_IPD9)
+summary(poi.lm8.nb.2)
+#summary(poi.lm8.nb)
+
+exp(10*(coef(poi.lm8.nb.2)[2] - 1.96* sqrt(vcov(poi.lm8.nb.2)[2,2])))
+exp(10*(coef(poi.lm8.nb.2)[2] + 1.96* sqrt(vcov(poi.lm8.nb.2)[2,2])))
+
+################################################################################
+#######################Part VII. Final model diagnostic ########################
+################################################################################
+
+
+par(mfrow=c(1,2))
+df <- data.frame(
+  Fitted_values = poi.lm8$fitted.values,
+  Pearson_Residuals = residuals(poi.lm8, type="pearson")^2
+)
+with(df, scatter.smooth(Fitted_values, Pearson_Residuals))
+abline(h=1, col="red")
+title(main = "Final model that was previousely fitted using Poisson")
+
+df <- data.frame(
+  Fitted_values = poi.lm8.nb$fitted.values,
+  Pearson_Residuals = residuals(poi.lm8.nb, type="pearson")^2
+)
+with(df, scatter.smooth(Fitted_values, Pearson_Residuals))
+abline(h=1, col="red")
+title(main = "Final model fitted using NB")
+
+################################################################################
+#######################Part VIII. Sensitivity analysis  ########################
+################################################################################
+
+poi.lm8.nb.2 <- glm.nb(IPD ~ 
+                         PCV_Coverage +
+                         Age_Group2 +
+                         logInflenza + 
+                         PCV_Coverage*Age_Group2 +
+                         offset(log(Population)),
+                       data = PCV7_IPD9)
+summary(poi.lm8.nb.2)
+#summary(poi.lm8.nb)
+
+PCV7_IPD9 <- PCV7_IPD
+PCV7_IPD9$host_perc <- PCV7_IPD9$IPD/PCV7_IPD9$Population
+PCV7_IPD9$Age_Group2 <- ""
+PCV7_IPD9$Age_Group2[PCV7_IPD9$Age_Group == 1] <- "5-17 yr" 
+PCV7_IPD9$Age_Group2[PCV7_IPD9$Age_Group == 2] <- "18-39 yr" 
+PCV7_IPD9$Age_Group2[PCV7_IPD9$Age_Group == 3] <- "40-64 yr" 
+PCV7_IPD9$Age_Group2[PCV7_IPD9$Age_Group == 4] <- "65 and over" 
+PCV7_IPD9$Age_Group2 <- factor(PCV7_IPD9$Age_Group2)
+
+PCV7_IPD9$Influenza[PCV7_IPD9$Influenza==0] = min(PCV7_IPD$Influenza[PCV7_IPD$Influenza!=0], na.rm = T)/10
+PCV7_IPD9$Influenza_rate_2 <- log(PCV7_IPD9$Influenza)
+poi.lm8.nb_sens <- glm.nb(IPD ~ 
+                       PCV_Coverage +
+                       Age_Group +
+                         Influenza_rate_2 + 
+                       PCV_Coverage*Age_Group +
+                       offset(log(Population)),
+                     data = PCV7_IPD9)
+
+summary(poi.lm8)
+summary(poi.lm8.nb_sens)
+
+poi.lm188 <- glm(IPD ~ 
+                  factor(State) ,             
+                offset = log(Population), 
+                data = PCV7_IPD5, 
+                family = poisson(link=log))
+summary(poi.lm188)
+
